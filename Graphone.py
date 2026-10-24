@@ -1,0 +1,182 @@
+import requests
+import urllib.parse
+
+geocode_url = "https://graphhopper.com/api/1/geocode?"
+route_url = "https://graphhopper.com/api/1/route?"
+key = "8d42e24b-3040-4ff5-a9a6-c1ff7d51199a"  # Reemplaza con tu clave de GraphHopper
+
+
+def geocoding(location, key):
+    while location.strip() == "":
+        location = input("Ingrese nuevamente la ubicación: ")
+
+    geocode_url = "https://graphhopper.com/api/1/geocode?"
+    url = geocode_url + urllib.parse.urlencode({
+        "q": location,
+        "limit": "1",
+        "key": key
+    })
+
+    try:
+        replydata = requests.get(url, timeout=20)
+        json_data = replydata.json()
+        json_status = replydata.status_code
+
+        if json_status == 200:
+            hits = json_data.get("hits", [])
+
+            # Evita el error IndexError cuando no hay resultados
+            if not hits:
+                print("No se encontró la ubicación: " + location)
+                return 404, None, None, location
+
+            lat = hits[0]["point"]["lat"]
+            lng = hits[0]["point"]["lng"]
+            name = hits[0]["name"]
+            value = hits[0].get("osm_value", "No especificado")
+
+            if "country" in hits[0]:
+                country = hits[0]["country"]
+            else:
+                country = ""
+
+            if "state" in hits[0]:
+                state = hits[0]["state"]
+            else:
+                state = ""
+
+            if len(state) != 0 and len(country) != 0:
+                new_loc = name + ", " + state + ", " + country
+            elif len(state) != 0:
+                new_loc = name + ", " + state
+            elif len(country) != 0:
+                new_loc = name + ", " + country
+            else:
+                new_loc = name
+
+            print(
+                "URL de geocodificación para " + new_loc
+                + " (Tipo de ubicación: " + value + ")\n" + url
+            )
+
+        else:
+            print(
+                "Estado de la API de geocodificación: "
+                + str(json_status)
+                + "\nMensaje de error: "
+                + json_data.get("message", "Error desconocido")
+            )
+            return json_status, None, None, location
+
+        return json_status, lat, lng, new_loc
+
+    except (requests.RequestException, ValueError, KeyError) as error:
+        print("Error al consultar la API de geocodificación: " + str(error))
+        return 0, None, None, location
+
+
+while True:
+    loc1 = input(
+        "\nUbicación de origen (escriba 's' o 'salir' para terminar): "
+    ).strip()
+
+    if loc1.lower() in ("quit", "q", "s", "salir"):
+        print("Programa finalizado.")
+        break
+
+    orig = geocoding(loc1, key)
+
+    if orig[0] != 200:
+        print("No se pudo encontrar el punto de origen. Intente nuevamente.")
+        continue
+
+    loc2 = input(
+        "Destino (escriba 's' o 'salir' para terminar): "
+    ).strip()
+
+    if loc2.lower() in ("quit", "q", "s", "salir"):
+        print("Programa finalizado.")
+        break
+
+    dest = geocoding(loc2, key)
+
+    if dest[0] != 200:
+        print("No se pudo encontrar el destino. Intente nuevamente.")
+        continue
+
+    print("=================================================")
+
+    op = "&point=" + str(orig[1]) + "%2C" + str(orig[2])
+    dp = "&point=" + str(dest[1]) + "%2C" + str(dest[2])
+
+    paths_url = (
+        route_url
+        + urllib.parse.urlencode({"key": key})
+        + op
+        + dp
+        + "&locale=es"
+    )
+
+    try:
+        response = requests.get(paths_url, timeout=30)
+        paths_status = response.status_code
+        paths_data = response.json()
+
+        print(
+            "Estado de la API de rutas: " + str(paths_status)
+            + "\nURL de la API de rutas:\n" + paths_url
+        )
+
+        print("=================================================")
+
+        if paths_status == 200 and paths_data.get("paths"):
+            print("Indicaciones desde " + orig[3] + " hasta " + dest[3])
+            print("=================================================")
+
+            distance_meters = paths_data["paths"][0]["distance"]
+            time_ms = paths_data["paths"][0]["time"]
+
+            miles = distance_meters / 1000 / 1.609344
+            km = distance_meters / 1000
+
+            total_seconds = int(time_ms / 1000)
+            sec = total_seconds % 60
+            min = (total_seconds // 60) % 60
+            hr = total_seconds // 3600
+
+            print(
+                "Distancia recorrida: "
+                "{0:.2f} millas / {1:.2f} km".format(miles, km)
+            )
+
+            print(
+                "Duración del viaje: "
+                "{0:02d}:{1:02d}:{2:02d}".format(hr, min, sec)
+            )
+
+            print("=================================================")
+            print("Indicaciones de la ruta:")
+
+            for each in range(len(paths_data["paths"][0]["instructions"])):
+                instruction = paths_data["paths"][0]["instructions"][each]
+                path = instruction["text"]
+                distance = instruction["distance"]
+
+                print(
+                    "{0} ({1:.2f} km / {2:.2f} millas)".format(
+                        path,
+                        distance / 1000,
+                        distance / 1000 / 1.609344
+                    )
+                )
+
+            print("=============================================")
+
+        else:
+            print(
+                "No se pudo calcular la ruta. Mensaje: "
+                + paths_data.get("message", "No hay rutas disponibles.")
+            )
+
+    except (requests.RequestException, ValueError, KeyError, IndexError) as error:
+        print("Error al consultar la API de rutas: " + str(error))
